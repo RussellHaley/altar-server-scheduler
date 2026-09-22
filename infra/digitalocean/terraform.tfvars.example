@@ -1,0 +1,4 @@
+do_token  = "set-through-your-secret-store"
+repository = "your-org/sjhn-scheduler"
+branch     = "main"
+domain     = "schedule.example.ca"

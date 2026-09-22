@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: scheduler
+      POSTGRES_USER: scheduler
+      POSTGRES_PASSWORD: scheduler
+    ports:
+      # The app uses db:5432 internally. Publish a different loopback-only port
+      # for optional host-side inspection without conflicting with system PostgreSQL.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scheduler -d scheduler"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://scheduler:scheduler@db:5432/scheduler?schema=public
+      NEXT_PUBLIC_APP_NAME: SJHN Altar Server Scheduler
+      APP_ENV: local
+      AUTH_SECRET: local-development-secret-change-me
+      AUTH_DEV_MODE: "true"
+      AUTH_DEV_EMAIL: russ.haley@gmail.com
+      ADMIN_EMAILS: russ.haley@gmail.com
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres-data:

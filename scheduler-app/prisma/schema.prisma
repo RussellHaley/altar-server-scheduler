@@ -1,0 +1,288 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProfileStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ProfileKind {
+  ADULT
+  MINOR
+}
+
+enum RotaState {
+  DRAFT
+  GENERATED
+  UNDER_REVIEW
+  PUBLISHED
+  ARCHIVED
+  CANCELLED
+  REPLACED
+}
+
+enum SlotState {
+  OPEN
+  REQUESTED
+  ASSIGNED
+  DECLINED
+  CANCELLED
+}
+
+enum InvitationType {
+  NEW_ADULT_ACCOUNT
+  MINOR_MATURATION
+}
+
+model UserAccount {
+  id                    String                 @id @default(cuid())
+  email                 String                 @unique
+  displayName           String
+  phonePrimary          String?
+  phoneSecondary        String?
+  isAdministrator       Boolean                @default(false)
+  authUserId            String?                @unique
+  authUser              User?                  @relation(fields: [authUserId], references: [id])
+  adultProfile          ServerProfile?
+  managedMinors         ServerProfile[]        @relation("ManagingAdult")
+  qualificationsGranted RoleQualification[]
+  invitationsCreated    EnrollmentInvitation[] @relation("InvitationCreatedBy")
+  invitationsUsed       EnrollmentInvitation[] @relation("InvitationUsedBy")
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+}
+
+// Auth.js identity and session persistence. Domain permissions remain on UserAccount.
+model User {
+  id            String       @id @default(cuid())
+  name          String?
+  email         String?      @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  domainAccount UserAccount?
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model ServerProfile {
+  id             String                 @id @default(cuid())
+  firstName      String
+  lastName       String
+  dateOfBirth    DateTime
+  kind           ProfileKind
+  status         ProfileStatus          @default(ACTIVE)
+  accountId      String?                @unique
+  account        UserAccount?           @relation(fields: [accountId], references: [id])
+  managerId      String?
+  manager        UserAccount?           @relation("ManagingAdult", fields: [managerId], references: [id])
+  qualifications RoleQualification[]
+  assignments    Assignment[]
+  invitations    EnrollmentInvitation[] @relation("InvitationTargetProfile")
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@index([managerId])
+}
+
+model EnrollmentInvitation {
+  id              String         @id @default(cuid())
+  email           String
+  tokenHash       String         @unique
+  invitationType  InvitationType @default(NEW_ADULT_ACCOUNT)
+  targetProfileId String?
+  targetProfile   ServerProfile? @relation("InvitationTargetProfile", fields: [targetProfileId], references: [id], onDelete: SetNull)
+  createdById     String
+  createdBy       UserAccount    @relation("InvitationCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  usedById        String?
+  usedBy          UserAccount?   @relation("InvitationUsedBy", fields: [usedById], references: [id], onDelete: SetNull)
+  expiresAt       DateTime
+  usedAt          DateTime?
+  cancelledAt     DateTime?
+  createdAt       DateTime       @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+}
+
+model Role {
+  id                   String                       @id @default(cuid())
+  name                 String                       @unique
+  abbreviation         String                       @unique
+  description          String?
+  displayOrder         Int                          @default(0)
+  isActive             Boolean                      @default(true)
+  qualifications       RoleQualification[]
+  requirements         PositionRequirement[]
+  templateRequirements ServiceTemplateRequirement[]
+}
+
+model RoleQualification {
+  id          String        @id @default(cuid())
+  profileId   String
+  roleId      String
+  grantedById String
+  notes       String?
+  grantedAt   DateTime      @default(now())
+  profile     ServerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  role        Role          @relation(fields: [roleId], references: [id])
+  grantedBy   UserAccount   @relation(fields: [grantedById], references: [id])
+
+  @@unique([profileId, roleId])
+}
+
+model Rota {
+  id             String    @id @default(cuid())
+  name           String
+  startDate      DateTime
+  endDate        DateTime
+  state          RotaState @default(DRAFT)
+  sourceId       String?   @unique
+  sourceMetadata Json?
+  createdById    String?
+  publishedById  String?
+  publishedAt    DateTime?
+  services       Service[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model ServiceTemplate {
+  id                 String                       @id @default(cuid())
+  name               String                       @unique
+  key                String?                      @unique
+  description        String?
+  defaultServiceType String?
+  isActive           Boolean                      @default(true)
+  requirements       ServiceTemplateRequirement[]
+  services           Service[]
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+}
+
+model ServiceTemplateRequirement {
+  id            String          @id @default(cuid())
+  templateId    String
+  roleId        String
+  abbreviation  String
+  requiredCount Int
+  displayOrder  Int
+  template      ServiceTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  role          Role            @relation(fields: [roleId], references: [id])
+
+  @@unique([templateId, roleId])
+  @@index([templateId, displayOrder])
+}
+
+model Service {
+  id               String                @id @default(cuid())
+  rotaId           String
+  rota             Rota                  @relation(fields: [rotaId], references: [id], onDelete: Cascade)
+  startsAt         DateTime
+  name             String
+  description      String?
+  liturgicalColor  String?
+  liturgicalTitle  String?
+  liturgicalSymbol String?
+  liturgicalRank   String?
+  cottaStyle       String?
+  serviceForm      String?
+  sourceId         String?               @unique
+  sourceMetadata   Json?
+  templateId       String?
+  requirements     PositionRequirement[]
+  slots            PositionSlot[]
+  template         ServiceTemplate?      @relation(fields: [templateId], references: [id])
+
+  @@index([startsAt])
+}
+
+model PositionRequirement {
+  id            String         @id @default(cuid())
+  serviceId     String
+  roleId        String
+  requiredCount Int
+  displayOrder  Int
+  service       Service        @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  role          Role           @relation(fields: [roleId], references: [id])
+  slots         PositionSlot[]
+}
+
+model PositionSlot {
+  id            String              @id @default(cuid())
+  serviceId     String
+  requirementId String
+  slotNumber    Int
+  state         SlotState           @default(OPEN)
+  service       Service             @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  requirement   PositionRequirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  assignment    Assignment?
+
+  @@unique([requirementId, slotNumber])
+  @@index([serviceId, state])
+}
+
+model Assignment {
+  id           String        @id @default(cuid())
+  slotId       String        @unique
+  profileId    String
+  assignedAt   DateTime      @default(now())
+  assignedById String?
+  slot         PositionSlot  @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  profile      ServerProfile @relation(fields: [profileId], references: [id])
+}
+
+model AuditEvent {
+  id         String   @id @default(cuid())
+  actorId    String?
+  entityType String
+  entityId   String
+  action     String
+  summary    String
+  metadata   Json?
+  occurredAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([occurredAt])
+}
