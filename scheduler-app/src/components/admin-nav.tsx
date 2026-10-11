@@ -7,5 +7,6 @@ export function AdminNav() {
     <Link href="/admin/calendar">Calendar</Link>
     <Link href="/admin/servers">Server administration</Link>
     <Link href="/admin/accounts">Accounts</Link>
+    <Link href="/account">My household</Link>
   </nav>;
 }

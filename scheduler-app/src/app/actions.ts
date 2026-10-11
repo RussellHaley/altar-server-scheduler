@@ -13,6 +13,12 @@ async function requireAdmin() {
   return session.user.id;
 }
 
+async function requireAccount() {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Account access required");
+  return session.user.id;
+}
+
 async function audit(actorId: string, entityType: string, entityId: string, action: string, summary: string, metadata?: object) {
   await prisma.auditEvent.create({ data: { actorId, entityType, entityId, action, summary, metadata } });
 }
@@ -20,6 +26,28 @@ async function audit(actorId: string, entityType: string, entityId: string, acti
 function optionalText(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
   return text.length > 0 ? text : null;
+}
+
+function minutesFromTime(value: FormDataEntryValue | null) {
+  const text = optionalText(value);
+  if (!text) return null;
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(text);
+  if (!match) throw new Error("Availability time must use HH:MM format");
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+async function assertManagedProfile(accountId: string, profileId: string) {
+  const profile = await prisma.serverProfile.findFirst({
+    where: {
+      id: profileId,
+      OR: [
+        { kind: "ADULT", accountId },
+        { kind: "MINOR", managerId: accountId },
+      ],
+    },
+  });
+  if (!profile) throw new Error("You can only manage availability for your own household");
+  return profile;
 }
 
 export async function createProfile(formData: FormData) {
@@ -46,6 +74,95 @@ export async function createProfile(formData: FormData) {
   await audit(actorId, "ServerProfile", profile.id, "create", `Created ${profile.firstName} ${profile.lastName}`);
   revalidatePath("/admin");
   revalidatePath("/admin/servers");
+}
+
+export async function updateOwnAccountContact(formData: FormData) {
+  const accountId = await requireAccount();
+  const data = z.object({
+    displayName: z.string().trim().min(1),
+    phonePrimary: z.string().trim().max(40).optional(),
+    phoneSecondary: z.string().trim().max(40).optional(),
+  }).parse(Object.fromEntries(formData));
+  const account = await prisma.userAccount.update({
+    where: { id: accountId },
+    data: {
+      displayName: data.displayName,
+      phonePrimary: optionalText(formData.get("phonePrimary")),
+      phoneSecondary: optionalText(formData.get("phoneSecondary")),
+    },
+  });
+  await audit(accountId, "UserAccount", account.id, "contact", "Updated own contact details");
+  revalidatePath("/");
+  revalidatePath("/account");
+}
+
+export async function updateAvailabilityRule(formData: FormData) {
+  const accountId = await requireAccount();
+  const data = z.object({
+    profileId: z.string().min(1),
+    dayOfWeek: z.coerce.number().int().min(0).max(6),
+    isAvailable: z.enum(["true", "false"]),
+  }).parse(Object.fromEntries(formData));
+  await assertManagedProfile(accountId, data.profileId);
+  const fromMinutes = minutesFromTime(formData.get("availableFrom"));
+  const untilMinutes = minutesFromTime(formData.get("availableUntil"));
+  if (fromMinutes !== null && untilMinutes !== null && untilMinutes <= fromMinutes) throw new Error("Availability end time must be after start time");
+  const rule = await prisma.availabilityRule.upsert({
+    where: { profileId_dayOfWeek: { profileId: data.profileId, dayOfWeek: data.dayOfWeek } },
+    update: {
+      isAvailable: data.isAvailable === "true",
+      availableFromMinutes: data.isAvailable === "true" ? fromMinutes : null,
+      availableUntilMinutes: data.isAvailable === "true" ? untilMinutes : null,
+    },
+    create: {
+      profileId: data.profileId,
+      dayOfWeek: data.dayOfWeek,
+      isAvailable: data.isAvailable === "true",
+      availableFromMinutes: data.isAvailable === "true" ? fromMinutes : null,
+      availableUntilMinutes: data.isAvailable === "true" ? untilMinutes : null,
+    },
+  });
+  await audit(accountId, "AvailabilityRule", rule.id, "upsert", "Updated recurring availability");
+  revalidatePath("/account");
+}
+
+export async function createAvailabilityOverride(_previousState: { message: string; success: boolean }, formData: FormData) {
+  const accountId = await requireAccount();
+  const data = z.object({
+    profileId: z.string().min(1),
+    startsAt: z.coerce.date(),
+    endsAt: z.coerce.date(),
+    isAvailable: z.enum(["true", "false"]),
+    reason: z.string().trim().max(300).optional(),
+  }).safeParse(Object.fromEntries(formData));
+  if (!data.success) return { message: "Enter valid start and end dates and a note of at most 300 characters.", success: false };
+  if (data.data.endsAt < data.data.startsAt) return { message: "End date must be on or after the start date.", success: false };
+  const values = data.data;
+  await assertManagedProfile(accountId, values.profileId);
+  const override = await prisma.availabilityOverride.create({
+    data: {
+      profileId: values.profileId,
+      startsAt: values.startsAt,
+      endsAt: values.endsAt,
+      isAvailable: values.isAvailable === "true",
+      reason: optionalText(formData.get("reason")),
+      createdById: accountId,
+    },
+  });
+  await audit(accountId, "AvailabilityOverride", override.id, "create", "Created availability override");
+  revalidatePath("/account");
+  return { message: "Availability override added.", success: true };
+}
+
+export async function deleteAvailabilityOverride(formData: FormData) {
+  const accountId = await requireAccount();
+  const overrideId = z.string().min(1).parse(formData.get("overrideId"));
+  const override = await prisma.availabilityOverride.findFirst({ where: { id: overrideId, createdById: accountId } });
+  if (!override) throw new Error("Availability override not found");
+  await assertManagedProfile(accountId, override.profileId);
+  await prisma.availabilityOverride.delete({ where: { id: override.id } });
+  await audit(accountId, "AvailabilityOverride", override.id, "delete", "Deleted availability override");
+  revalidatePath("/account");
 }
 
 export async function updateUserAccountContact(formData: FormData) {

@@ -85,11 +85,11 @@ export default async function AdminCalendarPage({ searchParams }: { searchParams
   const days = calendarDays(month);
   const rotaQuery = `rota=${encodeURIComponent(rota.id)}`;
 
-  return <main className="shell calendar-shell">
+  return <main className="shell calendar-shell admin-calendar-page">
     <p><a href="/admin">← Administration</a></p>
     <AdminNav />
-    <header className="calendar-header">
-      <div><h1>Rota calendar</h1><p>{rota.name} <span className="pill">{rota.state}</span></p></div>
+    <header className="calendar-header admin-calendar-banner">
+      <div><p className="admin-calendar-eyebrow">Scheduling workspace</p><h1>Administration calendar</h1><p>{rota.name} <span className="admin-calendar-state">{rota.state}</span></p></div>
       <form action="/admin/calendar" className="rota-picker">
         <label>Rota<select defaultValue={rota.id} name="rota" aria-label="Select rota">
           {rotas.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
@@ -99,7 +99,7 @@ export default async function AdminCalendarPage({ searchParams }: { searchParams
       </form>
     </header>
     <p className="calendar-note">The calendar uses parish time ({parishTimeZone.replace("_", " ")}). Select a service to review or assign its positions.</p>
-    <nav className="month-navigation" aria-label="Calendar month">
+    <nav className="month-navigation admin-month-navigation" aria-label="Calendar month">
       <a href={`/admin/calendar?${rotaQuery}&month=${shiftMonth(month, -1)}`}>← Previous</a>
       <h2>{monthLabel(month)}</h2>
       <a href={`/admin/calendar?${rotaQuery}&month=${shiftMonth(month, 1)}`}>Next →</a>

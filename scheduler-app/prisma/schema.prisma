@@ -42,21 +42,22 @@ enum InvitationType {
 }
 
 model UserAccount {
-  id                    String                 @id @default(cuid())
-  email                 String                 @unique
-  displayName           String
-  phonePrimary          String?
-  phoneSecondary        String?
-  isAdministrator       Boolean                @default(false)
-  authUserId            String?                @unique
-  authUser              User?                  @relation(fields: [authUserId], references: [id])
-  adultProfile          ServerProfile?
-  managedMinors         ServerProfile[]        @relation("ManagingAdult")
-  qualificationsGranted RoleQualification[]
-  invitationsCreated    EnrollmentInvitation[] @relation("InvitationCreatedBy")
-  invitationsUsed       EnrollmentInvitation[] @relation("InvitationUsedBy")
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
+  id                           String                 @id @default(cuid())
+  email                        String                 @unique
+  displayName                  String
+  phonePrimary                 String?
+  phoneSecondary               String?
+  isAdministrator              Boolean                @default(false)
+  authUserId                   String?                @unique
+  authUser                     User?                  @relation(fields: [authUserId], references: [id])
+  adultProfile                 ServerProfile?
+  managedMinors                ServerProfile[]        @relation("ManagingAdult")
+  qualificationsGranted        RoleQualification[]
+  invitationsCreated           EnrollmentInvitation[] @relation("InvitationCreatedBy")
+  invitationsUsed              EnrollmentInvitation[] @relation("InvitationUsedBy")
+  availabilityOverridesCreated AvailabilityOverride[]
+  createdAt                    DateTime               @default(now())
+  updatedAt                    DateTime               @updatedAt
 }
 
 // Auth.js identity and session persistence. Domain permissions remain on UserAccount.
@@ -107,23 +108,57 @@ model VerificationToken {
 }
 
 model ServerProfile {
-  id             String                 @id @default(cuid())
-  firstName      String
-  lastName       String
-  dateOfBirth    DateTime
-  kind           ProfileKind
-  status         ProfileStatus          @default(ACTIVE)
-  accountId      String?                @unique
-  account        UserAccount?           @relation(fields: [accountId], references: [id])
-  managerId      String?
-  manager        UserAccount?           @relation("ManagingAdult", fields: [managerId], references: [id])
-  qualifications RoleQualification[]
-  assignments    Assignment[]
-  invitations    EnrollmentInvitation[] @relation("InvitationTargetProfile")
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
+  id                    String                 @id @default(cuid())
+  firstName             String
+  lastName              String
+  dateOfBirth           DateTime
+  kind                  ProfileKind
+  status                ProfileStatus          @default(ACTIVE)
+  accountId             String?                @unique
+  account               UserAccount?           @relation(fields: [accountId], references: [id])
+  managerId             String?
+  manager               UserAccount?           @relation("ManagingAdult", fields: [managerId], references: [id])
+  qualifications        RoleQualification[]
+  assignments           Assignment[]
+  invitations           EnrollmentInvitation[] @relation("InvitationTargetProfile")
+  availabilityRules     AvailabilityRule[]
+  availabilityOverrides AvailabilityOverride[]
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
 
   @@index([managerId])
+}
+
+model AvailabilityRule {
+  id                    String        @id @default(cuid())
+  profileId             String
+  dayOfWeek             Int
+  isAvailable           Boolean       @default(true)
+  availableFromMinutes  Int?
+  availableUntilMinutes Int?
+  profile               ServerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@unique([profileId, dayOfWeek])
+  @@index([profileId])
+}
+
+model AvailabilityOverride {
+  id          String        @id @default(cuid())
+  profileId   String
+  startsAt    DateTime
+  endsAt      DateTime
+  isAvailable Boolean
+  reason      String?
+  createdById String
+  profile     ServerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdBy   UserAccount   @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([profileId, startsAt])
+  @@index([createdById])
 }
 
 model EnrollmentInvitation {
